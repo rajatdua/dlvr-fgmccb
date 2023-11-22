@@ -110,6 +110,7 @@ class BirdsDataset(datasets.ImageFolder):
             h_rel = scale_resize_crop * h_bbx / 375
 
             target = torch.tensor([target, x_rel, y_rel, w_rel, h_rel])
+            # target = torch.tensor([target, x_bbx, y_bbx, w_bbx, h_bbx])
 
         if self.transform_ is not None:
             sample = self.transform_(sample)
