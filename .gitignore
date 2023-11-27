@@ -162,3 +162,5 @@ cython_debug/
 # datasets directory
 Datasets/
 TrainedModels/
+
+.DS_Store
