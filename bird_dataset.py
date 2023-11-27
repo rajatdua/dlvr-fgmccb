@@ -199,14 +199,16 @@ class BirdsDataset(datasets.ImageFolder):
     def _get_triplet_anchors(self, root, indices_to_use, map_idx, map_parent):
         triplet_anchors = []
         for idx in indices_to_use:
+            anchor = map_idx[idx]['file_name']
             positive_anchor = self._get_positive_anchor(idx, map_idx)
             negative_anchor = self._get_negative_anchor(idx, map_idx, map_parent)
-            triplet_anchors.append((positive_anchor, negative_anchor))
+            triplet_anchors.append((anchor, positive_anchor, negative_anchor))
         return triplet_anchors
 
     def __getitem__(self, index):
         # Generate one sample
         sample, target = super(BirdsDataset, self).__getitem__(index)
+        triplet = []
 
         if self.bboxes is not None:
             # Squeeze coordinates of the bounding box to the range [0, 1]
@@ -224,22 +226,30 @@ class BirdsDataset(datasets.ImageFolder):
             # target = torch.tensor([target, x_bbx, y_bbx, w_bbx, h_bbx])
 
         if self.triplet is not None:
-            positive_anchor, negative_anchor = self.triplet[index]
+            anchor, positive_anchor, negative_anchor = self.triplet[index]
+            anchor_path = f'{self.my_img_root}/{anchor}'
             positive_anchor_path = f'{self.my_img_root}/{positive_anchor}'
             negative_anchor_path = f'{self.my_img_root}/{negative_anchor}'
             # load the image
+            load_anchor = Image.open(anchor_path).convert('RGB')
             load_positive = Image.open(positive_anchor_path).convert('RGB')
             load_negative = Image.open(negative_anchor_path).convert('RGB')
 
             if self.transform_ is not None:
+                load_anchor = self.transform_(load_anchor)
                 load_positive = self.transform_(load_positive)
                 load_negative = self.transform_(load_negative)
 
-            target = torch.cat((load_positive, load_negative), dim=0)
+            # positive_tensor = transforms.ToTensor()(load_positive)
+            # negative_tensor = transforms.ToTensor()(load_negative)
+
+            # target = torch.cat((target, positive_tensor.view(-1), negative_tensor.view(-1)))
+            triplet.append((load_anchor, load_positive, load_negative))
+            # triplet.append((positive_tensor, negative_tensor))
 
         if self.transform_ is not None:
             sample = self.transform_(sample)
         if self.target_transform_ is not None:
             target = self.target_transform_(target)
 
-        return sample, target
+        return sample, target, triplet
