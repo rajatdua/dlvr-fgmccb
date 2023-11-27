@@ -4,6 +4,7 @@ from torchvision import datasets, transforms
 from collections import defaultdict
 import random
 from PIL import Image
+import json
 
 
 class BirdsDataset(datasets.ImageFolder):
@@ -22,11 +23,13 @@ class BirdsDataset(datasets.ImageFolder):
                  use_bounding_boxes=False,
                  use_no_bg_images=False,
                  use_triplet=False,
+                 should_save_maps=True,
                  ):
 
         dataset_images_folder = 'processed-images' if use_no_bg_images else 'images'
 
         img_root = os.path.join(root, dataset_images_folder)
+        self.my_img_root = img_root
 
         super(BirdsDataset, self).__init__(
             root=img_root,
@@ -46,7 +49,19 @@ class BirdsDataset(datasets.ImageFolder):
         # Obtain filenames of images
         filenames_to_use, map_idx, map_parent = self._get_filenames_to_use(root, indices_to_use)
 
-        print(map_idx, map_parent)
+        if should_save_maps and not os.path.exists(os.path.join(root, 'map_idx.json')):
+            print(f'Creating Maps in {root}')
+            save_map_path = os.path.join(root)
+            # Convert dictionaries to JSON-formatted strings
+            json_map_idx = json.dumps(map_idx)
+            json_map_parent = json.dumps(map_parent)
+
+            # Save JSON strings to files
+            with open(f'{save_map_path}/map_idx.json', 'w') as file:
+                file.write(json_map_idx)
+
+            with open(f'{save_map_path}/map_parent.json', 'w') as file:
+                file.write(json_map_parent)
 
         img_paths_cut = {'/'.join(img_path_x.rsplit('/', 2)[-2:]): idx for idx, (img_path_x, lb) in
                          enumerate(self.imgs)}
@@ -108,13 +123,20 @@ class BirdsDataset(datasets.ImageFolder):
                 if int(idx) in indices_to_use:
                     filenames_to_use.add(path)
                     # Extract the details from the path
-                    id_name, file_name = path.split('/')
-                    id, name_parent = id_name.split('.')
-                    name, parent_name = name_parent.split('_')
+                    id_name = path.split('/')[0]
+                    _, name_parent = id_name.split('.')
+                    name_split = name_parent.split('_')
+                    parent_name = name_split[-1]
+                    name = '_'.join(name_split[:-1])
+                    # for cases when there is no child, example - bobolink, etc.
+                    if name == '':
+                        name = parent_name
 
                     # Update the parent map
                     if name not in map_parent[parent_name]:
                         map_parent[parent_name][name] = []
+                    else:
+                        map_parent[parent_name][name].append(path)
 
         # Second pass: process the image paths
         with open(path_to_index, 'r') as in_file:
@@ -122,26 +144,30 @@ class BirdsDataset(datasets.ImageFolder):
                 idx, path = line_fn.strip('\n').split(' ', 2)
                 if int(idx) in indices_to_use:
                     # Extract the details from the path
-                    id_name, file_name = path.split('/')
-                    id, name_parent = id_name.split('.')
-                    name, parent_name = name_parent.split('_')
+                    id_name = path.split('/')[0]
+                    class_id, name_parent = id_name.split('.')
+                    name_split = name_parent.split('_')
+                    parent_name = name_split[-1]
+                    name = '_'.join(name_split[:-1])
+                    if name == '':
+                        name = parent_name
 
                     # Update the maps
                     if idx not in map_idx:
-                        map_idx[idx] = {
+                        map_idx[int(idx)] = {
                             'parent_details': {
                                 'parent_name': parent_name,
                                 'children': list(map_parent[parent_name].keys())
                             },
                             'name': name,
-                            'id': id,
+                            'id': class_id,
                             'file_name': path,
-                            'others': []
+                            'others': map_parent[parent_name][name]
                         }
-                    else:
-                        map_idx[idx]['others'].append(path)
-
-                    map_parent[parent_name][name].append(path)
+                    # else:
+                    #     map_idx[idx]['others'].append(path)
+                    #
+                    # map_parent[parent_name][name].append(path)
 
         return filenames_to_use, map_idx, map_parent
 
@@ -159,14 +185,16 @@ class BirdsDataset(datasets.ImageFolder):
 
     def _get_positive_anchor(self, idx, map_idx):
         curr_anchor = map_idx[idx]
-        random_value = random.choice(curr_anchor.other)
+        random_value = random.choice(curr_anchor['others'])
         return random_value
 
     def _get_negative_anchor(self, idx, map_idx, map_parent):
         curr_anchor = map_idx[idx]
-        random_child = random.choice(curr_anchor.parent_details.children)
-        new_child = map_parent[random_child]
-        return random.choice(new_child)
+        selected_children = curr_anchor['parent_details']['children']
+        random_child = random.choice(selected_children)
+        new_child = map_parent[curr_anchor['parent_details']['parent_name']][random_child]
+        random_value = random.choice(new_child)
+        return random_value
 
     def _get_triplet_anchors(self, root, indices_to_use, map_idx, map_parent):
         triplet_anchors = []
@@ -179,7 +207,6 @@ class BirdsDataset(datasets.ImageFolder):
     def __getitem__(self, index):
         # Generate one sample
         sample, target = super(BirdsDataset, self).__getitem__(index)
-        triplet = []
 
         if self.bboxes is not None:
             # Squeeze coordinates of the bounding box to the range [0, 1]
@@ -198,19 +225,21 @@ class BirdsDataset(datasets.ImageFolder):
 
         if self.triplet is not None:
             positive_anchor, negative_anchor = self.triplet[index]
+            positive_anchor_path = f'{self.my_img_root}/{positive_anchor}'
+            negative_anchor_path = f'{self.my_img_root}/{negative_anchor}'
             # load the image
-            load_positive = Image.open(positive_anchor).convert('RGB')
-            load_negative = Image.open(negative_anchor).convert('RGB')
+            load_positive = Image.open(positive_anchor_path).convert('RGB')
+            load_negative = Image.open(negative_anchor_path).convert('RGB')
 
             if self.transform_ is not None:
                 load_positive = self.transform_(load_positive)
                 load_negative = self.transform_(load_negative)
 
-            triplet = torch.tensor([load_positive, load_negative])
+            target = torch.cat((load_positive, load_negative), dim=0)
 
         if self.transform_ is not None:
             sample = self.transform_(sample)
         if self.target_transform_ is not None:
             target = self.target_transform_(target)
 
-        return sample, target, triplet
+        return sample, target
