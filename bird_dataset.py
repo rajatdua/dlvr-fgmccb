@@ -5,6 +5,17 @@ from collections import defaultdict
 import random
 from PIL import Image
 import json
+from skimage import io, color, metrics, transform
+
+
+def compute_ssim(img1, img2):
+    img1_gray = color.rgb2gray(img1)
+    img2_gray = color.rgb2gray(img2)
+    return metrics.structural_similarity(img1_gray, img2_gray)
+
+
+def resize_image(image, target_size=(500, 375)):
+    return transform.resize(image, target_size, mode='reflect', anti_aliasing=True)
 
 
 class BirdsDataset(datasets.ImageFolder):
@@ -188,20 +199,36 @@ class BirdsDataset(datasets.ImageFolder):
         random_value = random.choice(curr_anchor['others'])
         return random_value
 
-    def _get_negative_anchor(self, idx, map_idx, map_parent):
+    def _get_negative_anchor(self, idx, map_idx, map_parent, positive_anchor_path):
         curr_anchor = map_idx[idx]
         selected_children = curr_anchor['parent_details']['children']
         random_child = random.choice(selected_children)
         new_child = map_parent[curr_anchor['parent_details']['parent_name']][random_child]
-        random_value = random.choice(new_child)
-        return random_value
+        # random_value = random.choice(new_child)
+
+        most_different_image = None
+        min_similarity = float('inf')
+        positive_anchor = io.imread(f'{self.my_img_root}/{positive_anchor_path}')
+        positive_anchor_resized = resize_image(positive_anchor)
+
+        for neg_path in new_child:
+            negative_image = io.imread(f'{self.my_img_root}/{neg_path}')
+            negative_image_resized = resize_image(negative_image, target_size=positive_anchor_resized.shape[:2])
+
+            similarity = compute_ssim(positive_anchor_resized, negative_image_resized)
+
+            if similarity < min_similarity:
+                min_similarity = similarity
+                most_different_image = neg_path
+
+        return most_different_image
 
     def _get_triplet_anchors(self, root, indices_to_use, map_idx, map_parent):
         triplet_anchors = []
         for idx in indices_to_use:
             anchor = map_idx[idx]['file_name']
             positive_anchor = self._get_positive_anchor(idx, map_idx)
-            negative_anchor = self._get_negative_anchor(idx, map_idx, map_parent)
+            negative_anchor = self._get_negative_anchor(idx, map_idx, map_parent, positive_anchor)
             triplet_anchors.append((anchor, positive_anchor, negative_anchor))
         return triplet_anchors
 
@@ -226,12 +253,14 @@ class BirdsDataset(datasets.ImageFolder):
             # target = torch.tensor([target, x_bbx, y_bbx, w_bbx, h_bbx])
 
         if self.triplet is not None:
-            anchor, positive_anchor, negative_anchor = self.triplet[index]
-            anchor_path = f'{self.my_img_root}/{anchor}'
+            # anchor, positive_anchor, negative_anchor = self.triplet[index]
+            _, positive_anchor, negative_anchor = self.triplet[index]
+            # anchor_path = f'{self.my_img_root}/{anchor}'
             positive_anchor_path = f'{self.my_img_root}/{positive_anchor}'
             negative_anchor_path = f'{self.my_img_root}/{negative_anchor}'
             # load the image
-            load_anchor = Image.open(anchor_path).convert('RGB')
+            # load_anchor = Image.open(anchor_path).convert('RGB')
+            load_anchor = sample
             load_positive = Image.open(positive_anchor_path).convert('RGB')
             load_negative = Image.open(negative_anchor_path).convert('RGB')
 
