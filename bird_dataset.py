@@ -9,13 +9,15 @@ from skimage import io, color, metrics, transform
 
 
 def compute_ssim(img1, img2):
-    img1_gray = color.rgb2gray(img1)
-    img2_gray = color.rgb2gray(img2)
-    return metrics.structural_similarity(img1_gray, img2_gray)
+    # img1_gray = color.rgb2gray(img1)
+    # img2_gray = color.rgb2gray(img2)
+    return metrics.structural_similarity(img1, img2)
 
 
 def resize_image(image, target_size=(500, 375)):
-    return transform.resize(image, target_size, mode='reflect', anti_aliasing=True)
+    resized_image = transform.resize(image, target_size, mode='reflect', anti_aliasing=True)
+    gray_image = color.rgb2gray(resized_image)
+    return gray_image
 
 
 class BirdsDataset(datasets.ImageFolder):
